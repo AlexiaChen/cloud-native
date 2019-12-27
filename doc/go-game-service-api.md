@@ -1,5 +1,3 @@
-FORMAT: 1A
-HOST: http://gogo.local.micropcf.io/
 
 # Go Game
 
