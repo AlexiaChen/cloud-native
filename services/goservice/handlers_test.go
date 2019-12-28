@@ -228,6 +228,139 @@ func TestGetMatchDetailsWithExisting(t *testing.T) {
 	}
 }
 
+func TestGetMatchListReturnsWhats(t *testing.T) {
+	client := &http.Client{}
+	repo := newInMemoryRepository()
+	repo.addMatch(gogo.NewMatch(19, "black", "white"))
+	repo.addMatch(gogo.NewMatch(13, "bl", "wh"))
+	repo.addMatch(gogo.NewMatch(19, "b", "w"))
+	server := httptest.NewServer(http.HandlerFunc(getMatchListHandler(formatter, repo)))
+	defer server.Close()
+	req, _ := http.NewRequest("GET", server.URL, nil)
+
+	resp, err := client.Do(req)
+
+	if err != nil {
+		t.Error("Errored when sending request to the server", err)
+		return
+	}
+
+	defer resp.Body.Close()
+	payload, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Error("Failed to read response from server", err)
+	}
+
+	var matchList []newMatchResponse
+	err = json.Unmarshal(payload, &matchList)
+	if err != nil {
+		t.Errorf("Could not unmarshal payload into []newMatchResponse slice")
+	}
+
+	repoMatches, err := repo.getMatches()
+	if err != nil {
+		t.Errorf("Unexpected error in getMatches(): %s", err)
+	}
+	if len(matchList) != len(repoMatches) {
+		t.Errorf("Match response size should have equaled repo size, sizes were: %d and %d", len(matchList), len(repoMatches))
+	}
+
+	for idx := 0; idx < 3; idx++ {
+		if matchList[idx].GridSize != repoMatches[idx].GridSize {
+			t.Errorf("Gridsize mismatch at index %d. Got %d and %d", idx, matchList[idx].GridSize, repoMatches[idx].GridSize)
+		}
+		if matchList[idx].PlayerBlack != matchList[idx].PlayerBlack {
+			t.Errorf("PlayerBlack mismatch at index %d. Got %s and %s", idx, matchList[idx].PlayerBlack, repoMatches[idx].PlayerBlack)
+		}
+		if matchList[idx].PlayerWhite != matchList[idx].PlayerWhite {
+			t.Errorf("PlayerWhite mismatch at index %d. Got %s and %s", idx, matchList[idx].PlayerWhite, repoMatches[idx].PlayerWhite)
+		}
+	}
+}
+
+func TestCannotMakeMoveOnNonExistentgame(t *testing.T) {
+	var (
+		request  *http.Request
+		recorder *httptest.ResponseRecorder
+	)
+
+	repo := newInMemoryRepository()
+	server := MakeTestServer(repo)
+	targetMatchID := "nevergonnahappen"
+
+	recorder = httptest.NewRecorder()
+	body := []byte("{\n  \"player\": 2,\n  \"position\": {\n    \"x\": 3,\n    \"y\": 10\n  }\n}")
+	reader := bytes.NewReader(body)
+	request, _ = http.NewRequest("POST", "/matches/"+targetMatchID+"/moves", reader)
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Errorf("Should have returned a 404 for a missing match, but got %d instead.", recorder.Code)
+	}
+}
+
+func TestAddMoveIsReflectedInGameBoard(t *testing.T) {
+	var (
+		request  *http.Request
+		recorder *httptest.ResponseRecorder
+	)
+
+	repo := newInMemoryRepository()
+	server := MakeTestServer(repo)
+	targetMatch := gogo.NewMatch(19, "black", "white")
+	repo.addMatch(targetMatch)
+	targetMatchID := targetMatch.ID
+	recorder = httptest.NewRecorder()
+	body := []byte("{\n  \"player\": 2,\n  \"position\": {\n    \"x\": 3,\n    \"y\": 10\n  }\n}")
+	reader := bytes.NewReader(body)
+	request, _ = http.NewRequest("POST", "/matches/"+targetMatchID+"/moves", reader)
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Errorf("Expected creation of new move to return 201, got %d", recorder.Code)
+	}
+
+	recorder2 := httptest.NewRecorder()
+	request2, _ := http.NewRequest("GET", "/matches/"+targetMatchID, nil)
+	server.ServeHTTP(recorder2, request2)
+	if recorder2.Code != http.StatusOK {
+		t.Errorf("Should've gotten a 200 querying match details, got %d", recorder.Code)
+	}
+
+	payload := recorder2.Body.Bytes()
+	var matchDetails matchDetailsResponse
+	err := json.Unmarshal(payload, &matchDetails)
+	if err != nil {
+		t.Errorf("Could not unmarshal payload into match details response.")
+	}
+
+	if len(matchDetails.GameBoard[0]) != 19 {
+		t.Errorf("Game board size isn't 19, got %d", len(matchDetails.GameBoard[0]))
+	}
+
+	if matchDetails.GameBoard[3][10] != gogo.PlayerWhite {
+		t.Errorf("Game board did not reflect added move to 3,10. Board: %v", matchDetails.GameBoard)
+	}
+
+	recorder3 := httptest.NewRecorder()
+	body2 := []byte("{\n  \"player\": 1,\n  \"position\": {\n    \"x\": 8,\n    \"y\": 8\n  }\n}")
+	reader2 := bytes.NewReader(body2)
+	request3, _ := http.NewRequest("POST", "/matches/"+targetMatchID+"/moves", reader2)
+	server.ServeHTTP(recorder3, request3)
+	if recorder3.Code != http.StatusCreated {
+		t.Errorf("Expected 201(Created) for 2nd move, got %d", recorder3.Code)
+	}
+
+	payload = recorder3.Body.Bytes()
+	var matchDetails2 matchDetailsResponse
+	err = json.Unmarshal(payload, &matchDetails2)
+	if err != nil {
+		t.Errorf("Could not unmarshal response for 2nd move add, %s", err.Error())
+	}
+	if matchDetails2.GameBoard[8][8] != gogo.PlayerBlack {
+		t.Errorf("Added move should belong to black at 8,8 - belongs to %d", matchDetails2.GameBoard[8][8])
+	}
+}
+
 func MakeTestServer(repository matchRepository) *negroni.Negroni {
 	server := negroni.New() // don't need all the middleware here or logging.
 	mx := mux.NewRouter()
