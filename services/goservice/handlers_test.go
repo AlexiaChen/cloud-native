@@ -11,6 +11,8 @@ import (
 	"io/ioutil"
 
 	"github.com/cloudnativego/gogo-engine"
+	"github.com/codegangsta/negroni"
+	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 )
 
@@ -176,4 +178,29 @@ func TestGetMatchListWithEmpty(t *testing.T) {
 	if len(matchList) != 0 {
 		t.Errorf("Expected an empty list of match responses, got %d", len(matchList))
 	}
+}
+
+func TestGetMatchDetailsWith404(t *testing.T) {
+	var (
+		request  *http.Request
+		recorder *httptest.ResponseRecorder
+	)
+
+	repo := newInMemoryRepository()
+	server := MakeTestServer(repo)
+	recorder = httptest.NewRecorder()
+	request, _ = http.NewRequest("GET", "/matches/1234", nil)
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Errorf("Expected %v; received %v", http.StatusNotFound, recorder.Code)
+	}
+}
+
+func MakeTestServer(repository matchRepository) *negroni.Negroni {
+	server := negroni.New() // don't need all the middleware here or logging.
+	mx := mux.NewRouter()
+	initRoutes(mx, formatter, repository)
+	server.UseHandler(mx)
+	return server
 }
