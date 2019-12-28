@@ -197,6 +197,37 @@ func TestGetMatchDetailsWith404(t *testing.T) {
 	}
 }
 
+func TestGetMatchDetailsWithExisting(t *testing.T) {
+	var (
+		request  *http.Request
+		recorder *httptest.ResponseRecorder
+	)
+
+	repo := newInMemoryRepository()
+	server := MakeTestServer(repo)
+
+	targetMatch := gogo.NewMatch(19, "black", "white")
+	repo.addMatch(targetMatch)
+	targetMatchID := targetMatch.ID
+
+	recorder = httptest.NewRecorder()
+	request, _ = http.NewRequest("GET", "/matches/"+targetMatchID, nil)
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("Expected %v; received %v", http.StatusOK, recorder.Code)
+	}
+
+	var match matchDetailsResponse
+	err := json.Unmarshal(recorder.Body.Bytes(), &match)
+	if err != nil {
+		t.Errorf("Error unmarshaling match details: %s", err)
+	}
+	if match.GridSize != 19 {
+		t.Errorf("Expected match gridsize to be 19; received %d", match.GridSize)
+	}
+}
+
 func MakeTestServer(repository matchRepository) *negroni.Negroni {
 	server := negroni.New() // don't need all the middleware here or logging.
 	mx := mux.NewRouter()
