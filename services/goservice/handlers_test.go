@@ -146,3 +146,34 @@ func TestCreateMatch(t *testing.T) {
 		t.Errorf("Expected black player to be alfred, got %s", matchResponse.PlayerBlack)
 	}
 }
+
+func TestGetMatchListWithEmpty(t *testing.T) {
+	client := &http.Client{}
+	repo := newInMemoryRepository()
+	server := httptest.NewServer(http.HandlerFunc(getMatchListHandler(formatter, repo)))
+	defer server.Close()
+	req, _ := http.NewRequest("GET", server.URL, nil)
+
+	resp, err := client.Do(req)
+
+	if err != nil {
+		t.Error("Errored when sending request to the server", err)
+		return
+	}
+
+	defer resp.Body.Close()
+	payload, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Error("Failed to read response from server", err)
+	}
+
+	var matchList []newMatchResponse
+	err = json.Unmarshal(payload, &matchList)
+	if err != nil {
+		t.Errorf("Could not unmarshal payload into []newMatchResponse slice")
+	}
+
+	if len(matchList) != 0 {
+		t.Errorf("Expected an empty list of match responses, got %d", len(matchList))
+	}
+}
